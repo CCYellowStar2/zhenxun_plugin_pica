@@ -34,11 +34,11 @@ usage：
 
 根据关键字搜本:
 1.[搜pica +关键字],返回符合的本子信息
-2.利用[1]中的漫画id, [看pica +漫画id]
+2.利用[1]中的漫画id, [看pica +漫画id +章节数（可选）]
 
 指定分区的关键字搜本:
 1.[分区搜 +分区+关键字],返回指定分区下的本子信息,空格分割
-2.利用[1]中的漫画id, [看pica +漫画id]
+2.利用[1]中的漫画id, [看pica +漫画id +章节数（可选）]
 
 随机本子:
 1.[随机本子],返回随机本子信息并发送
@@ -48,11 +48,14 @@ usage：
 
 我的收藏:
 1.[我的收藏 +页数(默认第一页)],返回我的收藏下的本子信息
-2.利用[1]中的漫画id, [看pica +漫画id]
+2.利用[1]中的漫画id, [看pica +漫画id +章节数（可选）]
+
+哔咔收藏:
+1.[哔咔收藏 +漫画id],收藏这个id的本子
 
 哔咔排行:
 1.[哔咔排行 +排序模式(H24, D7, D30)(默认H24也就是日榜)],返回哔咔排行榜下的本子信息
-2.利用[1]中的漫画id, [看pica +漫画id]
+2.利用[1]中的漫画id, [看pica +漫画id +章节数（可选）]
 
 清理哔咔缓存
 1.[清理哔咔缓存]来清理哔咔缓存的所有文件
@@ -82,9 +85,9 @@ __plugin_configs__ = {
         "default_value": None,
     },
     "zip_ispwd": {
-        "value": False,
+        "value": True,
         "help": "发送的压缩包是否设置密码",
-        "default_value": False,
+        "default_value": True,
     },
     "zip_password": {
         "value": 114514,
@@ -146,7 +149,7 @@ usage:生成合并转发消息节点
 param:chain:list(固定空列表，用于合成输出), msg(消息内容), #image(图片,目前似乎无法使用)
 return:chain(合成后的转发消息节点)
 '''
-def make_forward_msg(chain:list, msg, imag = ''):
+def make_forward_msg(chain:list, msg:list, imag = ''):
     for _msg in msg:
         data ={
                 "type": "node",
@@ -170,7 +173,7 @@ def make_forward_msg(chain:list, msg, imag = ''):
         
     return chain
 
-def make_forward_msgs(chain:list, msg, imag = []):
+def make_forward_msgs(chain:list, msg:list, imag = []):
     for _msg in msg:
         data ={
                 "type": "node",
@@ -209,7 +212,7 @@ def guess_command(input, command:list):
     return fuzzy_word, fuzzy_probability
 
 
-async def download_img(url, booktitle, originalName):
+async def download_img(url, booktitle, originalName,ep):
     error_recall = []
     print(url)
     booktitle = booktitle.strip()
@@ -219,21 +222,28 @@ async def download_img(url, booktitle, originalName):
         os.mkdir(pica_folder)
 
     comic_folder = os.path.join(pica_folder,sub)
+    comic_folder=comic_folder+"-"+str(ep)
     if not os.path.exists(comic_folder):
         os.mkdir(comic_folder)
-    async with aiohttp.ClientSession() as session:
-        rs = await session.get(url=url, headers=headers, proxy=proxy, timeout=60)
-        filename = str(originalName)
-        image_path = os.path.join(comic_folder,filename)
-        async with aiofiles.open(image_path, "wb") as download:
-            try:
-                await download.write(await rs.read())
-                change_img_md5(image_path)
-            except:
-                error_recall = "pica资源获取失败:HTTP状态码:"+str(rs.status)
-                print(error_recall)               
-
-    return error_recall
+    for i in range(3):
+        print(f"download_img --> {i}")
+        try:
+            async with aiohttp.ClientSession() as session:
+                rs = await session.get(url=url, headers=headers, proxy=proxy, timeout=60)
+                filename = str(originalName)
+                image_path = os.path.join(comic_folder,filename)
+                async with aiofiles.open(image_path, "wb") as download:
+                    try:
+                        await download.write(await rs.read())
+                        #change_img_md5(image_path)
+                    except:
+                        error_recall = "pica资源获取失败:HTTP状态码:"+str(rs.status)
+                        print(error_recall)
+                    return
+        except:
+            continue                        
+            print("这张失败了")
+    return error_recall        
 
 
 '''
@@ -241,7 +251,7 @@ usage:从指定漫画id进行图片下载
 param:bookid:str(漫画id)
 return:error_recall(错误回执,无错误时为空)
 '''
-async def get_comic_from_id(bookid:str, name = ''):
+async def get_comic_from_id(bookid:str, ep:int = 1, name = ''):
     global isok
     error_recall = []
     ex_input = bookid.strip()
@@ -253,7 +263,7 @@ async def get_comic_from_id(bookid:str, name = ''):
         thumb_url = cm_read["data"]["comic"]["thumb"]["fileServer"] + "/static/" + cm_read["data"]["comic"]["thumb"]["path"]
         if not name:
             name = cm_name
-        await download_thumb(thumb_url, name)
+        await download_thumb(thumb_url, name,ep)
     except:
         error_recall = "pica获取失败,可能是输入id错误"
         print(error_recall)
@@ -268,7 +278,7 @@ async def get_comic_from_id(bookid:str, name = ''):
         isok=False
         pages_num = pic_result["data"]["pages"]["pages"]
         for x in range(1, pages_num+1):
-            post_pic = await p.picture(ex_input,page=x)
+            post_pic = await p.picture(ex_input,ep_id=ep,page=x)
             post_pic = await post_pic.text()
             meta = json.loads(post_pic)
             docs = meta["data"]["pages"]["docs"]
@@ -279,7 +289,7 @@ async def get_comic_from_id(bookid:str, name = ''):
                 url = fileServer + "/static/" + imgpath
                 print(f"当前正在下载:第{x}页第{y}张:{ogname}")
                 try:
-                    await download_img(url,cm_name,ogname)
+                    await download_img(url,cm_name,ogname,ep)
                 except:
                     print(f"第{x}页第{y}张:{ogname}下载失败")
                     pass   
@@ -289,7 +299,7 @@ async def get_comic_from_id(bookid:str, name = ''):
 usage:下载指定url的封面图
 param:url(图片url), booktitle(漫画名,用来作为文件名)
 '''
-async def download_thumb(url, booktitle):
+async def download_thumb(url, booktitle,ep:int=1):
     error_recall = []
     booktitle = booktitle.strip()
     print(url)
@@ -299,26 +309,31 @@ async def download_thumb(url, booktitle):
         os.mkdir(pica_folder)
 
     comic_folder = os.path.join(pica_folder,sub)
+    comic_folder=comic_folder+"-"+str(ep)
     if not os.path.exists(comic_folder):
         os.mkdir(comic_folder)
-    try:
-        async with aiohttp.ClientSession() as session:
-            rs = await session.get(url=url, headers=headers, proxy=proxy, timeout=30)
-            filename = sub+"_cover"+".jpg"
-            image_path = os.path.join(comic_folder,filename)
-            async with aiofiles.open(image_path, "wb") as download:
-                try:
-                    await download.write(await rs.read())
-                    change_img_md5(image_path)
-                    thb_path = image(image_path)    
-                    return thb_path
-                except:
-                    error_recall = "pica请求出错:HTTP状态码:"+str(rs.status)
-                    print("pica资源获取失败:HTTP状态码:"+str(rs.status))
-    except:
-        print("这张失败了")
-        return error_recall
-        pass
+    for i in range(3):
+        print(f"download_thumb --> {i}")
+        try:
+            async with aiohttp.ClientSession() as session:
+                rs = await session.get(url=url, headers=headers, proxy=proxy, timeout=30)
+                filename = sub+"_cover"+".jpg"
+                image_path = os.path.join(comic_folder,filename)
+                async with aiofiles.open(image_path, "wb") as download:
+                    try:
+                        await download.write(await rs.read())
+
+                    except:
+                        error_recall = "pica请求出错:HTTP状态码:"+str(rs.status)
+                        print("pica资源获取失败:HTTP状态码:"+str(rs.status))
+                change_img_md5(image_path)
+                thb_path = image(image_path)    
+                return thb_path 
+        except:
+            continue
+            print("这张失败了")       
+            pass
+    return error_recall
 
 
 '''
@@ -336,7 +351,11 @@ async def get_random_favorite(res:dict):
         value_list = []
         bkid = meta[x]["_id"]
         bktitle = str(meta[x]["title"])
-        author = str(meta[x]["author"])
+        try:
+            author = str(meta[x]["author"])
+        except:
+            author = "不明"
+            pass
         bkthumb = str(meta[x]["thumb"]["fileServer"] + "/static/" + meta[x]["thumb"]["path"])
         value_list.append(bktitle)
         value_list.append(author)
@@ -386,7 +405,9 @@ async def get_search_bookid(result:dict, name = ''):
             chineseTeam = meta["chineseTeam"]
         except:
             chineseTeam = "Unknown"
-        comic_info = f"{title}：\n作者:{author}\n汉化:{chineseTeam}\n漫画ID:{bookid}"
+        cm_info1 = f"{title}：\n作者:{author}\n汉化:{chineseTeam}\n漫画ID:{bookid}"
+        comic_info.append(cm_info1)
+        comic_info.append("只有一个结果")
         if not name:
             name = title
         imgs.append(await download_thumb(thumb_url, name))
@@ -472,17 +493,29 @@ async def get_search_bookid(result:dict, name = ''):
         
     else:
         meta_1 = result["data"]["comics"]["docs"][0]
+        meta_2 = result["data"]["comics"]["docs"][1]
         try:
             chineseTeam_1 = meta_1["chineseTeam"]
         except:
             chineseTeam_1 = "Unknown"
+        try:
+            chineseTeam_2 = meta_2["chineseTeam"]
+        except:
+            chineseTeam_2 = "Unknown"
         cm_info1 = meta_1["title"] + "\n" + "作者:" + meta_1["author"] + "\n" + "汉化:" + chineseTeam_1 + "\n" +"漫画ID:" + meta_1["_id"]
+        cm_info2 = meta_2["title"] + "\n" + "作者:" + meta_2["author"] + "\n" + "汉化:" + chineseTeam_2 + "\n" +"漫画ID:" + meta_2["_id"]
+
+        comic_info.append(cm_info1)
+        comic_info.append(cm_info2)
         thumb_url = meta_1["thumb"]["fileServer"] + "/static/" + meta_1["thumb"]["path"]
+        thumb_url2 = meta_2["thumb"]["fileServer"] + "/static/" + meta_2["thumb"]["path"]
+        
         if not name:
             name = meta_1["title"] 
         imgs.append(await download_thumb(thumb_url, name))
+        imgs.append(await download_thumb(thumb_url2, meta_2["title"]))
         isok=True
-        return error_recall, cm_info1, imgs
+        return error_recall, comic_info, imgs
 
 async def get_rank(result:dict, name = ''):
     global isok
@@ -552,6 +585,33 @@ def make_zip(source_dir, output_filename):
     print(f"压缩包创建完成:位于{output_filename}")
     return output_filename
 
+favourite = on_command("哔咔收藏", aliases={"pika收藏", "pica收藏"}, block=True, priority=5)
+#>>>根据id收藏<<<
+@favourite.handle()
+async def favourite(bot: Bot, ev: Event, msg: Message = CommandArg()):
+    if not pica_account or not pica_password:
+        await bot.send(ev, "请去config.yaml配置文件设置你的哔咔账号密码")
+        return    
+    input1 = msg.extract_plain_text()
+    if not input1:
+        await bot.send(ev, "请输入要收藏的哔咔id！")
+        return     
+    try:
+        data = (await p.favourite(input1))  # type: ignore
+        data = await data.json()
+    except Exception as e:
+        await bot.send(ev, f"请求失败，{e}")  
+        return
+    print(data)
+    if not data["code"] == 200:
+        error_recall = "pica请求出错:HTTP状态码:"+str(data["code"])+"\n响应信息:" + data["message"]
+        await bot.send(ev, error_recall)
+    else:
+        if data["data"]["action"]=="favourite":
+            await bot.send(ev, "收藏成功")
+        elif data["data"]["action"]=="un_favourite":
+            await bot.send(ev, "取消收藏成功")
+
 
 rank = on_command("哔咔排行", aliases={"哔咔rank", "pikarank"}, block=True, priority=5)
 #>>>根据关键字搜本<<<
@@ -607,13 +667,13 @@ async def pica_rank(bot: Bot, ev: Event, msg: Message = CommandArg()):
                     await bot.send_group_forward_msg(group_id=ev.group_id, messages=out)
                 except:
                     await bot.send_group_forward_msg(group_id=ev.group_id, messages=out2)
-                    await bot.send(ev, "请使用 [看pica 漫画id] 来查看")
+                    await bot.send(ev, "请使用 [看pica 漫画id 章节数(可选)] 来查看")
                     return
             else:
                 await bot.send_private_forward_msg(user_id=ev.user_id, messages=out)
         else:
             await bot.send(ev, error)
-        await bot.send(ev, "请使用 [看pica 漫画id] 来查看")
+        await bot.send(ev, "请使用 [看pica 漫画id 章节数(可选)] 来查看")
 
 sv = on_command("搜pica", aliases={"搜哔咔", "搜pika"}, block=True, priority=5)
 #>>>根据关键字搜本<<<
@@ -677,13 +737,13 @@ async def search_pica(bot: Bot, ev: Event, msg: Message = CommandArg()):
                         await bot.send_group_forward_msg(group_id=ev.group_id, messages=out)
                     except:
                         await bot.send_group_forward_msg(group_id=ev.group_id, messages=out2)
-                        await bot.send(ev, "请使用 [看pica 漫画id] 来查看")
+                        await bot.send(ev, "请使用 [看pica 漫画id 章节数(可选)] 来查看")
                         return
                 else:
                     await bot.send_private_forward_msg(user_id=ev.user_id, messages=out)
             else:
                 await bot.send(ev, error)
-            await bot.send(ev, "请使用 [看pica 漫画id] 来查看")
+            await bot.send(ev, "请使用 [看pica 漫画id 章节数(可选)] 来查看")
 #冷却计时
 
 
@@ -750,13 +810,13 @@ async def search_pica_cate(bot: Bot, ev: Event, msg: Message = CommandArg()):
                         await bot.send_group_forward_msg(group_id=ev.group_id, messages=out)
                     except:
                         await bot.send_group_forward_msg(group_id=ev.group_id, messages=out2)
-                        await bot.send(ev, "请使用 [看pica 漫画id] 来查看")
+                        await bot.send(ev, "请使用 [看pica 漫画id 章节数(可选)] 来查看")
                         return
                 else:
                     await bot.send_private_forward_msg(user_id=ev.user_id, messages=out)
             else:
                 await bot.send(ev, error)
-            await bot.send(ev, "请使用 [看pica 漫画id] 来查看")
+            await bot.send(ev, "请使用 [看pica 漫画id 章节数(可选)] 来查看")
     #冷却计时
 
 
@@ -772,7 +832,7 @@ async def get_pica(bot: Bot, ev: Event, msg: Message = CommandArg()):
     if not pica_account or not pica_password:
         await bot.send(ev, "请去config.yaml配置文件设置你的哔咔账号密码")
         return    
-    input3 = msg.extract_plain_text()
+    input3 = msg.extract_plain_text().strip().split()
     if isinstance(ev, GroupMessageEvent):
         gid = ev.group_id
     uid = ev.user_id
@@ -781,8 +841,14 @@ async def get_pica(bot: Bot, ev: Event, msg: Message = CommandArg()):
         await bot.send(ev, "输入为空！")
         return
     else:
+        if len(input3)==1:
+            inp = input3[0]
+            ep = 1
+        elif len(input3)>=2:
+            inp = input3[0]
+            ep =  int(input3[1])
         try:
-            src = await p.comic_info(input3.strip())
+            src = await p.comic_info(inp.strip())
             src = await src.json()
         except Exception as e:
             await bot.send(ev, f"请求失败，{e}")    
@@ -794,8 +860,12 @@ async def get_pica(bot: Bot, ev: Event, msg: Message = CommandArg()):
             bookid = out["_id"]
             name = src_data["data"]["comic"]["title"].strip()
             author = src_data["data"]["comic"]["author"]
+            eps = out["epsCount"]
             pattern = r"(\\)|(/)|(\|)|(:)|(\*)|(\?)|(\")|(\<)|(\>)"
             name = re.sub(pattern, "-", name)
+            if ep > int(eps):
+                ep = int(eps)
+                await bot.send(ev, f"当前输入章节数大于总章节数，已将章节数改为当前最大数{ep}") 
         except:
             await bot.send(ev, f"没有这个id的本子，请检查id是否输入正确") 
             isok=True
@@ -804,21 +874,21 @@ async def get_pica(bot: Bot, ev: Event, msg: Message = CommandArg()):
             chineseTeam = src_data["data"]["comic"]["chineseTeam"]
         except:
             chineseTeam = "Unknown"
-        zipname = name+".zip"
+        zipname = name+"-"+str(ep)+".zip"
         zippath = f"{pica_folder}/{zipname}"
         if os.path.exists(zippath):
             await bot.send(ev, "本地已缓存")
         else:
             await bot.send(ev, "开始下载和打包")
             try:
-                await get_comic_from_id(bookid)
+                await get_comic_from_id(bookid,ep)
             except Exception as e:
                 await bot.send(ev, f"请求失败,{e}") 
                 isok=True
                 return
             dirname = os.path.join(pica_folder,str(name))
-            output_filename = dirname+".zip"
-            zippath = make_zip(source_dir=dirname, output_filename=output_filename)
+            output_filename = dirname+"-"+str(ep)+".zip"
+            zippath = make_zip(source_dir=dirname+"-"+str(ep), output_filename=output_filename)
 
     bot_friend_list = await bot.get_friend_list()
     fd_list = []
@@ -826,11 +896,12 @@ async def get_pica(bot: Bot, ev: Event, msg: Message = CommandArg()):
         gfd = fd["user_id"]
         fd_list.append(str(gfd))  
     comic_folder = os.path.join(pica_folder,str(name))
+    comic_folder=comic_folder+"-"+str(ep)
     thbname = str(name)+"_cover.jpg"
     image_path = os.path.join(comic_folder,thbname)
     thb_path = image(image_path)
     
-    msg = [f"{name}：\n作者:{author}\n汉化:{chineseTeam}\n漫画ID:{bookid}"]
+    msg = [f"{name}：\n作者:{author}\n汉化:{chineseTeam}\n漫画ID:{bookid}\n章节数:{eps}"]
     output = make_forward_msg(chain, msg, thb_path)
     output2 = make_forward_msg(chain, msg)
     if isinstance(ev, PrivateMessageEvent):
@@ -838,15 +909,27 @@ async def get_pica(bot: Bot, ev: Event, msg: Message = CommandArg()):
             await bot.send(ev, f"消息处理成功, 请注意私聊窗口")
             await bot.send_private_msg(user_id=int(uid),message=thb_path)
             await bot.send_private_msg(user_id=int(uid),message=msg[0])
-            await bot.upload_private_file(user_id=int(uid),file=zippath,name=name+".zip")
+            await bot.upload_private_file(user_id=int(uid),file=zippath,name=name+"-"+str(ep)+".zip")
 
     else:
         try:
             await bot.send_group_forward_msg(group_id=ev.group_id, messages=output)
         except:
-            await bot.send_group_forward_msg(group_id=ev.group_id, messages=output2)        
+            try:
+                await bot.send_group_forward_msg(group_id=ev.group_id, messages=output2)       
+            except:
+                try:
+                    await bot.upload_group_file(group_id=int(gid),file=zippath,name=name+"-"+str(ep)+".zip")      
+                    if Config.get_config("zhenxun_plugin_pica", "zip_ispwd"):
+                        ps = Config.get_config("zhenxun_plugin_pica", "zip_password")
+                        await bot.send(ev, f"压缩包已设置密码为{ps}")  
+                    await bot.send(ev, msg[0])   
+                    await bot.send(ev, thb_path) 
+                    return    
+                except:
+                    await bot.send(ev, f"消息已响应, 但上传失败.请查看日志窗口")
         try:
-            await bot.upload_group_file(group_id=int(gid),file=zippath,name=name+".zip")          
+            await bot.upload_group_file(group_id=int(gid),file=zippath,name=name+"-"+str(ep)+".zip")          
         except:
             await bot.send(ev, f"消息已响应, 但上传失败.请查看日志窗口")
     if Config.get_config("zhenxun_plugin_pica", "zip_ispwd"):
@@ -891,6 +974,7 @@ async def get_pica_random(bot: Bot, ev: Event):
     bookid = out["_id"]
     thumb_url = out["thumb"]["fileServer"] + "/static/" + out["thumb"]["path"]
     title = out["title"].strip()
+    eps = out["epsCount"]
     #去除特殊字符(使用标题作为文件夹名时,不能包含特殊字符)
     pattern = r"(\\)|(/)|(\|)|(:)|(\*)|(\?)|(\")|(\<)|(\>)"
     sub = re.sub(pattern, "-", title)
@@ -899,7 +983,7 @@ async def get_pica_random(bot: Bot, ev: Event):
         chineseTeam = out["chineseTeam"]
     except:
         chineseTeam = "Unknown"
-    comic_info = [f"{sub}：\n作者:{author}\n汉化:{chineseTeam}\n漫画ID:{bookid}"]
+    comic_info = [f"{sub}：\n作者:{author}\n汉化:{chineseTeam}\n漫画ID:{bookid}\n章节数:{eps}"]
     await bot.send(ev, "开始下载和打包")
     try:
         await get_comic_from_id(bookid)
@@ -908,8 +992,8 @@ async def get_pica_random(bot: Bot, ev: Event):
         isok=True
         return
     dirname = os.path.join(pica_folder,str(sub))
-    output_filename = dirname+".zip"
-    zippath = make_zip(source_dir=dirname, output_filename=output_filename)
+    output_filename = dirname+"-1"+".zip"
+    zippath = make_zip(source_dir=dirname+"-1", output_filename=output_filename)
 
     bot_friend_list = await bot.get_friend_list()
     fd_list = []
@@ -919,6 +1003,7 @@ async def get_pica_random(bot: Bot, ev: Event):
 
 
     comic_folder = os.path.join(pica_folder,sub)
+    comic_folder=comic_folder+"-1"
     thbname = sub+"_cover.jpg"
     image_path = os.path.join(comic_folder,thbname)
     thb_path = image(image_path)
@@ -929,7 +1014,7 @@ async def get_pica_random(bot: Bot, ev: Event):
             await bot.send_private_msg(user_id=int(uid),message=thb_path)
             await bot.send_private_msg(user_id=int(uid),message=comic_info[0])
             try:
-                await bot.upload_private_file(user_id=int(uid),file=zippath,name=title+".zip")
+                await bot.upload_private_file(user_id=int(uid),file=zippath,name=title+"-1"+".zip")
                 await bot.send(ev, f"消息处理成功, 请注意私聊窗口")                
             except:
                 await bot.send(ev, f"消息已响应, 但上传失败.请查看日志窗口")
@@ -939,7 +1024,7 @@ async def get_pica_random(bot: Bot, ev: Event):
         except:
             await bot.send_group_forward_msg(group_id=ev.group_id, messages=output2)        
         try:
-            await bot.upload_group_file(group_id=int(gid),file=zippath,name=title+".zip")           
+            await bot.upload_group_file(group_id=int(gid),file=zippath,name=title+"-1"+".zip")           
         except:
             await bot.send(ev, f"消息已响应, 但上传失败.请查看日志窗口")
     if Config.get_config("zhenxun_plugin_pica", "zip_ispwd"):
@@ -988,13 +1073,14 @@ async def get_pica_cate_random(bot: Bot, ev: Event, msg: Message = CommandArg())
     thumb_url = out["thumb"]["fileServer"] + "/static/" + out["thumb"]["path"]
     title = out["title"].strip()
     author = out["author"]
+    eps = out["epsCount"]
     pattern = r"(\\)|(/)|(\|)|(:)|(\*)|(\?)|(\")|(\<)|(\>)"
     sub = re.sub(pattern, "-", title)
     try:
         chineseTeam = out["chineseTeam"]
     except:
         chineseTeam = "Unknown"
-    comic_info = [f"{sub}：\n作者:{author}\n汉化:{chineseTeam}\n漫画ID:{bookid}"]
+    comic_info = [f"{sub}：\n作者:{author}\n汉化:{chineseTeam}\n漫画ID:{bookid}\n章节数:{eps}"]
     await bot.send(ev, "开始下载和打包")
     try:
         await get_comic_from_id(bookid)
@@ -1003,8 +1089,8 @@ async def get_pica_cate_random(bot: Bot, ev: Event, msg: Message = CommandArg())
         isok=True
         return
     dirname = os.path.join(pica_folder,str(sub))
-    output_filename = dirname+".zip"
-    zippath = make_zip(source_dir=dirname, output_filename=output_filename)
+    output_filename = dirname+"-1"+".zip"
+    zippath = make_zip(source_dir=dirname+"-1", output_filename=output_filename)
 
     bot_friend_list = await bot.get_friend_list()
     fd_list = []
@@ -1014,6 +1100,7 @@ async def get_pica_cate_random(bot: Bot, ev: Event, msg: Message = CommandArg())
 
 
     comic_folder = os.path.join(pica_folder,sub)
+    comic_folder=comic_folder+"-1"
     thbname = sub+"_cover.jpg"
     image_path = os.path.join(comic_folder,thbname)
     thb_path = image(image_path)
@@ -1024,7 +1111,7 @@ async def get_pica_cate_random(bot: Bot, ev: Event, msg: Message = CommandArg())
             await bot.send_private_msg(user_id=int(uid),message=thb_path)
             await bot.send_private_msg(user_id=int(uid),message=comic_info[0])
             try:
-                await bot.upload_private_file(user_id=int(uid),file=zippath,name=title+".zip")
+                await bot.upload_private_file(user_id=int(uid),file=zippath,name=title+"-1"+".zip")
                 await bot.send(ev, f"消息处理成功, 请注意私聊窗口")
                 
             except:
@@ -1035,7 +1122,7 @@ async def get_pica_cate_random(bot: Bot, ev: Event, msg: Message = CommandArg())
         except:
             await bot.send_group_forward_msg(group_id=ev.group_id, messages=output2)        
         try:
-            await bot.upload_group_file(group_id=int(gid),file=zippath,name=title+".zip")
+            await bot.upload_group_file(group_id=int(gid),file=zippath,name=title+"-1"+".zip")
            
         except:
             await bot.send(ev, f"消息已响应, 但上传失败.请查看日志窗口")
@@ -1116,6 +1203,7 @@ async def get_pica_cate_random(bot: Bot, ev: Event, msg: Message = CommandArg())
     await bot.send(ev, f"开始查看第{j}页，共{page_num}页")
     comment = await p.my_favourite(page=j,order=Order_Default)
     comment = await comment.text()
+    print(comment)
     com_js = json.loads(comment)
     try:
         favors,favors2 = await get_random_favorite(com_js)
@@ -1138,7 +1226,7 @@ async def get_pica_cate_random(bot: Bot, ev: Event, msg: Message = CommandArg())
             await bot.send_group_forward_msg(group_id=ev.group_id, messages=out2)
     else:
         await bot.send_private_forward_msg(user_id=ev.user_id, messages=out)
-    await bot.send(ev, "请使用 [看pica 漫画id] 来查看")
+    await bot.send(ev, "请使用 [看pica 漫画id 章节数(可选)] 来查看")
      #冷却计时
 
     #todo:随机获取一篇漫画后,直接发送
