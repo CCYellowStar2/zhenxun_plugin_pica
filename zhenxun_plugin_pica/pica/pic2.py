@@ -33,10 +33,6 @@ class Pica:
     Order_Point = "vd"  # 最多指名
 
     def __init__(self) -> None:
-        self.__s = aiohttp.ClientSession()
-        self.__s.proxies = proxy
-                            
-        self.__s.verify = False
         self.headers = {
             "api-key":           api_key,
             "accept":            "application/vnd.picacomic.com.v1+json",
@@ -72,12 +68,12 @@ class Pica:
         try:
             async with aiohttp.ClientSession() as session:
                 if method == "GET":
-                    rs = await session.get(url=url, proxy=self.__s.proxies, headers=header, allow_redirects=True, verify_ssl=False, timeout=30)
+                    rs = await session.get(url=url, proxy=proxy, headers=header, allow_redirects=True, verify_ssl=False, timeout=30)
                 if method == "POST":
                     if json == "":
-                        rs = await session.post(url=url, proxy=self.__s.proxies, headers=header, allow_redirects=True, verify_ssl=False, timeout=30)
+                        rs = await session.post(url=url, proxy=proxy, headers=header, allow_redirects=True, verify_ssl=False, timeout=30)
                     else:
-                        rs = await session.post(url=url, proxy=self.__s.proxies, headers=header, data=json, allow_redirects=True, verify_ssl=False, timeout=30)
+                        rs = await session.post(url=url, proxy=proxy, headers=header, data=json, allow_redirects=True, verify_ssl=False, timeout=30)
         except TimeoutError:
             print("寄")
             return
@@ -97,9 +93,9 @@ class Pica:
 
         async with aiohttp.ClientSession() as session:
             if method == "GET":
-                rs = await session.get(url=url, headers=header, proxy=self.__s.proxies, allow_redirects=True, verify_ssl=False, timeout=30)
+                rs = await session.get(url=url, headers=header, proxy=proxy, allow_redirects=True, verify_ssl=False, timeout=30)
             if method == "POST":
-                rs = await session.post(url=url, proxy=self.__s.proxies, headers=header, data=json, allow_redirects=True, verify_ssl=False, timeout=30)
+                rs = await session.post(url=url, proxy=proxy, headers=header, data=json, allow_redirects=True, verify_ssl=False, timeout=30)
         return rs       
 
     async def login(self, email, password):
@@ -188,6 +184,9 @@ class Pica:
 
     async def categories(self):
         url = "https://picaapi.picacomic.com/categories"
+        return await self.http_do(method="GET", url=url)
+    async def sign(self):
+        url = "https://picaapi.picacomic.com/users/punch-in"
         return await self.http_do(method="GET", url=url)
 
 '''
