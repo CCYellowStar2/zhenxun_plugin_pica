@@ -3,3 +3,4 @@ python-levenshtein
 fuzzywuzzy
 pyzipper
 aiohttp==3.8.4 ; python_full_version >= "3.8.1" and python_full_version < "4.0.0"
+jmcomic
