@@ -24,7 +24,7 @@ from utils.message_builder import custom_forward_msg
 from nonebot.permission import SUPERUSER
 from nonebot.adapters.onebot.v11 import Bot, Event, Message, MessageSegment, GroupMessageEvent, PrivateMessageEvent, NetworkError
 from asyncio.exceptions import TimeoutError
-
+from jmcomic import *
 
 
 __zx_plugin_name__ = "pica漫画"
@@ -62,7 +62,14 @@ usage：
 
 检查哔咔
 1.检查哔咔链接并重新登录
-    
+
+JMxxxxxxxx
+1.识别禁漫号发送本子
+
+搜jm本子
+1.[搜jm +关键字],返回符合的本子信息
+2.利用[1]中的jm号, [jmxxxxxx (jm 号) +章节数（可选）]
+
 """.strip()
 __plugin_des__ = " 可以看bica"
 __plugin_cmd__ = ["pica漫画","pica","pika漫画","哔咔漫画"]
@@ -125,6 +132,7 @@ Order_Default = "ld"
 "ld"  # 最多爱心
 "vd"  # 最多指名
 '''
+client = JmOption.default().new_jm_client()
 
 #在下载中
 isok=True
@@ -160,6 +168,30 @@ def make_forward_msg(chain:list, msg:list, imag = ''):
                 }
         }
         chain.append(data)
+    if imag:
+        data ={
+                "type": "node",
+                "data": {
+                    "name": str(forward_msg_name),
+                    "uin": str(forward_msg_uid),
+                    "content": imag,
+                }
+        }
+        chain.append(data)
+        
+    return chain
+
+def make_forward_msg2(chain:str, msg:list, imag = ''):
+
+    data ={
+            "type": "node",
+            "data": {
+                "name": str(forward_msg_name),
+                "uin": str(forward_msg_uid),
+                "content": msg,
+            }
+    }
+    chain.append(data)
     if imag:
         data ={
                 "type": "node",
@@ -235,7 +267,7 @@ async def download_img(url, booktitle, originalName,ep):
                 async with aiofiles.open(image_path, "wb") as download:
                     try:
                         await download.write(await rs.read())
-                        #change_img_md5(image_path)
+                        change_img_md5(image_path)
                     except:
                         error_recall = "pica资源获取失败:HTTP状态码:"+str(rs.status)
                         print(error_recall)
@@ -245,6 +277,70 @@ async def download_img(url, booktitle, originalName,ep):
             print("这张失败了")
     return error_recall        
 
+async def download_img2(url, booktitle, originalName,ep,scramble_id):
+    error_recall = []
+    print(url)
+    booktitle = booktitle.strip()
+    sub = re.sub(pattern, "-", booktitle)
+    #若不存在文件夹,先创建
+    if not os.path.exists(pica_folder):
+        os.mkdir(pica_folder)
+
+    comic_folder = os.path.join(pica_folder,sub)
+    comic_folder=comic_folder+"-"+str(ep)
+    if not os.path.exists(comic_folder):
+        os.mkdir(comic_folder)
+    for i in range(3):
+        print(f"download_img --> {i}")
+        async with aiohttp.ClientSession() as session:
+            try:
+                rs = await session.get(url=url, headers=headers, proxy=proxy, timeout=30)
+            except Exception as e:                      
+                print(f"这张失败了{type(e)}：{e}")
+                continue
+            filename = str(originalName)
+            image_path = os.path.join(comic_folder,filename)
+            JmImageTool.decode_and_save(
+                JmImageTool.get_num_by_url(scramble_id, url),
+                JmImageTool.open_image(await rs.read()),
+                image_path,
+            )
+            change_img_md5(image_path)
+            return
+
+    return error_recall 
+
+'''
+usage:从jm指定漫画id进行图片下载
+param:bookid:str(漫画id)
+return:error_recall(错误回执,无错误时为空)
+'''
+async def get_jm_from_id(bookid:str,album_id, ep:int = 1, name = ''):
+    global isok
+    error_recall = []
+    ex_input = bookid.strip()
+    
+    try:
+        cm = client.get_photo_detail(ex_input)
+        cm_name = cm.title
+        if not name:
+            name = cm_name
+        thumb_url = "https://cdn-msp.jmapinodeudzn.net/media/albums/" + album_id + ".jpg"
+        await download_thumb(thumb_url, name,ep)
+        isok=False
+        print(name)
+        for imge in cm:
+            print(f"当前正在下载:第{str(imge.index)}张: {imge.filename}")
+            try:
+                await download_img2(imge.img_url,cm_name,imge.filename,ep,imge.scramble_id)
+            except:
+                print(f"第{str(imge.index)}张: {imge.filename} 下载失败")
+                pass   
+        isok=True
+    except Exception as e:
+        error_recall = f"jm获取失败,可能是输入id错误.{type(e)}：{e}"
+        print(error_recall)
+        return error_recall
 
 '''
 usage:从指定漫画id进行图片下载
@@ -377,6 +473,44 @@ async def get_random_favorite(res:dict):
     isok=True
     return comic_info, comic_info2
 
+async def get_jm_bookid(result, name = ''):
+    global isok
+    error_recall = []
+    comic_info = []
+    imgs=[]
+    chain=[]
+    chain2=[]
+    ii=0
+    isok=False
+    if len(result.content) == 0:
+        error_recall = "jm搜索出错:搜索结果为空.请尝试更换关键词"
+        print(error_recall)
+        isok=True
+        return error_recall, comic_info, imgs
+    elif len(result.content) > 10:
+        ii=10
+    elif len(result.content) > 0 and len(result.content) <= 10 :
+        ii=len(result.content)
+    for i in range(ii):
+        meta = result.content[i][1]
+        bookid = meta["id"]
+        thumb_url = "https://cdn-msp.jmapinodeudzn.net/media/albums/" + bookid + ".jpg"
+        title = meta["name"]
+        author = meta["author"]
+
+        cm_info1 = f"{title}：\n作者:{author}\nJM号:{bookid}"
+        
+       
+        
+        o = make_forward_msg2(chain, cm_info1, await download_thumb(thumb_url, title))
+        o1 = make_forward_msg2(chain2, cm_info1)
+    isok=True
+    return error_recall, o, o1
+
+
+        
+
+
 '''
 usage:获取漫画id及信息
 param:result:dict(存有漫画信息的字典)
@@ -387,7 +521,9 @@ async def get_search_bookid(result:dict, name = ''):
     error_recall = []
     comic_info = []
     imgs=[]
-    i=0
+    chain=[]
+    chain2=[]
+    ii=0
     isok=False
     if result["data"]["comics"]["total"] == 0:
         error_recall = "pica搜索出错:搜索结果为空.请尝试更换关键词"
@@ -395,8 +531,12 @@ async def get_search_bookid(result:dict, name = ''):
         isok=True
         return error_recall, comic_info, imgs
 
-    elif result["data"]["comics"]["total"] == 1:
-        meta = result["data"]["comics"]["docs"][0]
+    elif result["data"]["comics"]["total"] > 10:
+        ii=10
+    elif result["data"]["comics"]["total"] > 0 and result["data"]["comics"]["total"] <= 10:
+        ii = result["data"]["comics"]["total"]
+    for i in range(ii):
+        meta = result["data"]["comics"]["docs"][i]
         bookid = meta["_id"]
         thumb_url = meta["thumb"]["fileServer"] + "/static/" + meta["thumb"]["path"]
         title = meta["title"]
@@ -406,116 +546,13 @@ async def get_search_bookid(result:dict, name = ''):
         except:
             chineseTeam = "Unknown"
         cm_info1 = f"{title}：\n作者:{author}\n汉化:{chineseTeam}\n漫画ID:{bookid}"
-        comic_info.append(cm_info1)
-        comic_info.append("只有一个结果")
-        if not name:
-            name = title
-        imgs.append(await download_thumb(thumb_url, name))
-        isok=True
-        return error_recall, comic_info, imgs
 
-    elif result["data"]["comics"]["total"] == 3:
+        o = make_forward_msg2(chain, cm_info1, await download_thumb(thumb_url, title))
+        o1 = make_forward_msg2(chain2, cm_info1)
+    isok=True
+    return error_recall, o, o1
 
-        meta_1 = result["data"]["comics"]["docs"][0]
-        meta_2 = result["data"]["comics"]["docs"][1]
-        meta_3 = result["data"]["comics"]["docs"][2]
-        #有时返回的JSON不存在chineseTeam
-        try:
-            chineseTeam_1 = meta_1["chineseTeam"]
-        except:
-            chineseTeam_1 = "Unknown"
-        
-        try:
-            chineseTeam_2 = meta_2["chineseTeam"]
-        except:
-            chineseTeam_2 = "Unknown"
-        
-        try:
-            chineseTeam_3 = meta_3["chineseTeam"]
-        except:
-            chineseTeam_3 = "Unknown"
-        cm_info1 = meta_1["title"] + "\n" + "作者:" + meta_1["author"] + "\n" + "汉化:" + chineseTeam_1 + "\n" +"漫画ID:" + meta_1["_id"]
-        cm_info2 = meta_2["title"] + "\n" + "作者:" + meta_2["author"] + "\n" + "汉化:" + chineseTeam_2 + "\n" +"漫画ID:" + meta_2["_id"]
-        cm_info3 = meta_3["title"] + "\n" + "作者:" + meta_3["author"] + "\n" + "汉化:" + chineseTeam_3 + "\n" +"漫画ID:" + meta_3["_id"]
-        comic_info.append(cm_info1)
-        comic_info.append(cm_info2)
-        comic_info.append(cm_info3)
-        thumb_url = meta_1["thumb"]["fileServer"] + "/static/" + meta_1["thumb"]["path"]
-        thumb_url2 = meta_2["thumb"]["fileServer"] + "/static/" + meta_2["thumb"]["path"]
-        thumb_url3 = meta_3["thumb"]["fileServer"] + "/static/" + meta_3["thumb"]["path"]
-        if not name:
-            name = meta_1["title"]        
-        imgs.append(await download_thumb(thumb_url, name))
-        imgs.append(await download_thumb(thumb_url2, meta_2["title"]))
-        imgs.append(await download_thumb(thumb_url3, meta_3["title"]))
-        isok=True
-        return error_recall, comic_info, imgs
-        
-    elif result["data"]["comics"]["total"] > 3:
-        if result["data"]["comics"]["total"] > 20:
-            i = 20
-        else:
-            i = result["data"]["comics"]["total"]
-        meta_1 = result["data"]["comics"]["docs"][random.randint(0,i-1)]
-        meta_2 = result["data"]["comics"]["docs"][random.randint(0,i-1)]
-        meta_3 = result["data"]["comics"]["docs"][random.randint(0,i-1)]
-        #有时返回的JSON不存在chineseTeam
-        try:
-            chineseTeam_1 = meta_1["chineseTeam"]
-        except:
-            chineseTeam_1 = "Unknown"
-        
-        try:
-            chineseTeam_2 = meta_2["chineseTeam"]
-        except:
-            chineseTeam_2 = "Unknown"
-        
-        try:
-            chineseTeam_3 = meta_3["chineseTeam"]
-        except:
-            chineseTeam_3 = "Unknown"
-        cm_info1 = meta_1["title"] + "\n" + "作者:" + meta_1["author"] + "\n" + "汉化:" + chineseTeam_1 + "\n" +"漫画ID:" + meta_1["_id"]
-        cm_info2 = meta_2["title"] + "\n" + "作者:" + meta_2["author"] + "\n" + "汉化:" + chineseTeam_2 + "\n" +"漫画ID:" + meta_2["_id"]
-        cm_info3 = meta_3["title"] + "\n" + "作者:" + meta_3["author"] + "\n" + "汉化:" + chineseTeam_3 + "\n" +"漫画ID:" + meta_3["_id"]
-        comic_info.append(cm_info1)
-        comic_info.append(cm_info2)
-        comic_info.append(cm_info3)
-        thumb_url = meta_1["thumb"]["fileServer"] + "/static/" + meta_1["thumb"]["path"]
-        thumb_url2 = meta_2["thumb"]["fileServer"] + "/static/" + meta_2["thumb"]["path"]
-        thumb_url3 = meta_3["thumb"]["fileServer"] + "/static/" + meta_3["thumb"]["path"]
-        if not name:
-            name = meta_1["title"]        
-        imgs.append(await download_thumb(thumb_url, name))
-        imgs.append(await download_thumb(thumb_url2, meta_2["title"]))
-        imgs.append(await download_thumb(thumb_url3, meta_3["title"]))
-        isok=True
-        return error_recall, comic_info, imgs
-        
-    else:
-        meta_1 = result["data"]["comics"]["docs"][0]
-        meta_2 = result["data"]["comics"]["docs"][1]
-        try:
-            chineseTeam_1 = meta_1["chineseTeam"]
-        except:
-            chineseTeam_1 = "Unknown"
-        try:
-            chineseTeam_2 = meta_2["chineseTeam"]
-        except:
-            chineseTeam_2 = "Unknown"
-        cm_info1 = meta_1["title"] + "\n" + "作者:" + meta_1["author"] + "\n" + "汉化:" + chineseTeam_1 + "\n" +"漫画ID:" + meta_1["_id"]
-        cm_info2 = meta_2["title"] + "\n" + "作者:" + meta_2["author"] + "\n" + "汉化:" + chineseTeam_2 + "\n" +"漫画ID:" + meta_2["_id"]
 
-        comic_info.append(cm_info1)
-        comic_info.append(cm_info2)
-        thumb_url = meta_1["thumb"]["fileServer"] + "/static/" + meta_1["thumb"]["path"]
-        thumb_url2 = meta_2["thumb"]["fileServer"] + "/static/" + meta_2["thumb"]["path"]
-        
-        if not name:
-            name = meta_1["title"] 
-        imgs.append(await download_thumb(thumb_url, name))
-        imgs.append(await download_thumb(thumb_url2, meta_2["title"]))
-        isok=True
-        return error_recall, comic_info, imgs
 
 async def get_rank(result:dict, name = ''):
     global isok
@@ -675,6 +712,68 @@ async def pica_rank(bot: Bot, ev: Event, msg: Message = CommandArg()):
             await bot.send(ev, error)
         await bot.send(ev, "请使用 [看pica 漫画id 章节数(可选)] 来查看")
 
+sjm = on_command("搜JM", aliases={"搜jm", "搜Jm", "搜禁漫"}, block=True, priority=5)
+#>>>根据关键字搜本<<<
+@sjm.handle()
+async def search_jm(bot: Bot, ev: Event, msg: Message = CommandArg()):
+    chain = []
+    global isok
+    if not isok:
+        await bot.send(ev, "有任务在进行中")
+        return    
+    input1 = msg.extract_plain_text()
+    if isinstance(ev, GroupMessageEvent):
+        gid = ev.group_id
+    uid = ev.user_id
+    #获取好友列表,并判断当前用户是否在好友列表中
+    bot_friend_list = await bot.get_friend_list()
+    fd_list = []
+    for fd in bot_friend_list:
+        gfd = fd["user_id"]
+        fd_list.append(str(gfd))   
+    #冷却限制
+
+    #忽略空关键词
+    if not input1:
+        await bot.send(ev, "输入为空！")
+        return
+    else:
+        #转换为繁体
+        ex_input = input1.strip()
+        #去除特殊字符(使用标题作为文件夹名时,不能包含特殊字符)
+        pattern = r"(\\)|(/)|(\|)|(:)|(\*)|(\?)|(\")|(\<)|(\>)"
+        sub = re.sub(pattern, "-", ex_input)
+
+        try:
+            search_post = client.search_site(search_query=ex_input, page=1)
+        except Exception as e:
+            await bot.send(ev, f"请求失败，{e}")   
+            return
+        search_result = search_post
+        print(search_result)
+        
+        await bot.send(ev, "开始整理")
+        try:
+            error, o,o1 = await get_jm_bookid(search_result)
+        except Exception as e:
+            await bot.send(ev, f"请求失败,{e}")  
+            isok=True
+            return
+        if not error:
+              
+            if isinstance(ev, GroupMessageEvent):
+                try:
+                    await bot.send_group_forward_msg(group_id=ev.group_id, messages=o)
+                except:
+                    await bot.send_group_forward_msg(group_id=ev.group_id, messages=o1)
+                    await bot.send(ev, "请使用 [jmxxxxxx(jm号) 章节数(可选)] 来查看")
+                    return
+            else:
+                await bot.send_private_forward_msg(user_id=ev.user_id, messages=o)
+        else:
+            await bot.send(ev, error)
+        await bot.send(ev, "请使用 [jmxxxxxx(jm号) 章节数(可选)] 来查看")
+
 sv = on_command("搜pica", aliases={"搜哔咔", "搜pika"}, block=True, priority=5)
 #>>>根据关键字搜本<<<
 @sv.handle()
@@ -724,23 +823,22 @@ async def search_pica(bot: Bot, ev: Event, msg: Message = CommandArg()):
         else:         
             await bot.send(ev, "开始整理")
             try:
-                error, comic_info,thb_path = await get_search_bookid(search_result)
+                error, o,o1 = await get_search_bookid(search_result)
             except Exception as e:
                 await bot.send(ev, f"请求失败,{e}")  
                 isok=True
                 return
             if not error:
-                out = make_forward_msgs(chain, comic_info, thb_path)
-                out2 = make_forward_msg(chain, comic_info)                
+               
                 if isinstance(ev, GroupMessageEvent):
                     try:
-                        await bot.send_group_forward_msg(group_id=ev.group_id, messages=out)
+                        await bot.send_group_forward_msg(group_id=ev.group_id, messages=o)
                     except:
-                        await bot.send_group_forward_msg(group_id=ev.group_id, messages=out2)
+                        await bot.send_group_forward_msg(group_id=ev.group_id, messages=o1)
                         await bot.send(ev, "请使用 [看pica 漫画id 章节数(可选)] 来查看")
                         return
                 else:
-                    await bot.send_private_forward_msg(user_id=ev.user_id, messages=out)
+                    await bot.send_private_forward_msg(user_id=ev.user_id, messages=o)
             else:
                 await bot.send(ev, error)
             await bot.send(ev, "请使用 [看pica 漫画id 章节数(可选)] 来查看")
@@ -797,23 +895,22 @@ async def search_pica_cate(bot: Bot, ev: Event, msg: Message = CommandArg()):
         else:
             await bot.send(ev, "开始整理")
             try:
-                error, comic_info,thb_path = await get_search_bookid(search_result)
+                error, o,o1 = await get_search_bookid(search_result)
             except Exception as e:
                 await bot.send(ev, f"请求失败,{e}")  
                 isok=True
                 return
             if not error:
-                out = make_forward_msgs(chain, comic_info, thb_path)
-                out2 = make_forward_msg(chain, comic_info)            
+           
                 if isinstance(ev, GroupMessageEvent):
                     try:
-                        await bot.send_group_forward_msg(group_id=ev.group_id, messages=out)
+                        await bot.send_group_forward_msg(group_id=ev.group_id, messages=o)
                     except:
-                        await bot.send_group_forward_msg(group_id=ev.group_id, messages=out2)
+                        await bot.send_group_forward_msg(group_id=ev.group_id, messages=o1)
                         await bot.send(ev, "请使用 [看pica 漫画id 章节数(可选)] 来查看")
                         return
                 else:
-                    await bot.send_private_forward_msg(user_id=ev.user_id, messages=out)
+                    await bot.send_private_forward_msg(user_id=ev.user_id, messages=o)
             else:
                 await bot.send(ev, error)
             await bot.send(ev, "请使用 [看pica 漫画id 章节数(可选)] 来查看")
@@ -908,6 +1005,114 @@ async def get_pica(bot: Bot, ev: Event, msg: Message = CommandArg()):
         if str(uid) in fd_list:
             await bot.send(ev, f"消息处理成功, 请注意私聊窗口")
             await bot.send_private_msg(user_id=int(uid),message=thb_path)
+            await bot.send_private_msg(user_id=int(uid),message=msg[0])
+            await bot.upload_private_file(user_id=int(uid),file=zippath,name=name+"-"+str(ep)+".zip")
+
+    else:
+        try:
+            await bot.send_group_forward_msg(group_id=ev.group_id, messages=output)
+        except:
+            try:
+                await bot.send_group_forward_msg(group_id=ev.group_id, messages=output2)       
+            except:
+                try:
+                    await bot.upload_group_file(group_id=int(gid),file=zippath,name=name+"-"+str(ep)+".zip")      
+                    if Config.get_config("zhenxun_plugin_pica", "zip_ispwd"):
+                        ps = Config.get_config("zhenxun_plugin_pica", "zip_password")
+                        await bot.send(ev, f"压缩包已设置密码为{ps}")  
+                    await bot.send(ev, msg[0])   
+                    await bot.send(ev, thb_path) 
+                    return    
+                except:
+                    await bot.send(ev, f"消息已响应, 但上传失败.请查看日志窗口")
+        try:
+            await bot.upload_group_file(group_id=int(gid),file=zippath,name=name+"-"+str(ep)+".zip")          
+        except:
+            await bot.send(ev, f"消息已响应, 但上传失败.请查看日志窗口")
+    if Config.get_config("zhenxun_plugin_pica", "zip_ispwd"):
+        ps = Config.get_config("zhenxun_plugin_pica", "zip_password")
+        await bot.send(ev, f"压缩包已设置密码为{ps}")     
+
+jmid = on_command("JM", aliases={"Jm", "jm"}, block=True, priority=5)
+#>>>使用漫画ID查看本子<<<
+@jmid.handle()
+async def get_jm(bot: Bot, ev: Event, msg: Message = CommandArg()):
+    chain = []
+    global isok
+    if not isok:
+        await bot.send(ev, "有任务在进行中")
+        return       
+    input3 = msg.extract_plain_text().strip().split()
+    if isinstance(ev, GroupMessageEvent):
+        gid = ev.group_id
+    uid = ev.user_id
+
+    if not input3:
+        await bot.send(ev, "输入为空！")
+        return
+    else:
+        if len(input3)==1:
+            inp = input3[0]
+            ep = 1
+        elif len(input3)>=2:
+            inp = input3[0]
+            ep =  int(input3[1])
+        try:
+            src = client.get_photo_detail(inp.strip())
+        except Exception as e:
+            await bot.send(ev, f"请求失败，{e}")    
+            return
+        src_data = src
+        print(src_data)
+        try:
+            
+            name = src_data.title.strip()
+            author = src_data.author.strip()
+            eps = len(src_data.from_album.episode_list)
+            pattern = r"(\\)|(/)|(\|)|(:)|(\*)|(\?)|(\")|(\<)|(\>)"
+            name = re.sub(pattern, "-", name)
+            if ep > int(eps):
+                ep = int(eps)
+                await bot.send(ev, f"当前输入章节数大于总章节数，已将章节数改为当前最大数{ep}") 
+            bookid = src_data.from_album.episode_list[ep-1][0]
+            print(bookid)
+        except:
+            await bot.send(ev, f"没有这个id的本子，请检查id是否输入正确") 
+            isok=True
+            return
+        zipname = name+"-"+str(ep)+".zip"
+        zippath = f"{pica_folder}/{zipname}"
+        if os.path.exists(zippath):
+            await bot.send(ev, "本地已缓存")
+        else:
+            await bot.send(ev, "开始下载和打包")
+            try:
+                await get_jm_from_id(str(bookid),inp.strip(),ep,name)
+            except Exception as e:
+                await bot.send(ev, f"请求失败,{e}") 
+                isok=True
+                return
+            dirname = os.path.join(pica_folder,str(name))
+            output_filename = dirname+"-"+str(ep)+".zip"
+            zippath = make_zip(source_dir=dirname+"-"+str(ep), output_filename=output_filename)
+
+    bot_friend_list = await bot.get_friend_list()
+    fd_list = []
+    for fd in bot_friend_list:
+        gfd = fd["user_id"]
+        fd_list.append(str(gfd))  
+    comic_folder = os.path.join(pica_folder,str(name))
+    comic_folder=comic_folder+"-"+str(ep)
+    thbname = str(name)+"_cover.jpg"
+    image_path = os.path.join(comic_folder,thbname)
+    thb_path = image(image_path)
+    
+    msg = [f"{name}：\n作者:{author}\nJM号:{src_data.album_id}\n章节ID:{bookid}\n章节数:{eps}"]
+    output = make_forward_msg(chain, msg, thb_path)
+    output2 = make_forward_msg(chain, msg)
+    if isinstance(ev, PrivateMessageEvent):
+        if str(uid) in fd_list:
+            await bot.send(ev, f"消息处理成功, 请注意私聊窗口")
             await bot.send_private_msg(user_id=int(uid),message=msg[0])
             await bot.upload_private_file(user_id=int(uid),file=zippath,name=name+"-"+str(ep)+".zip")
 
